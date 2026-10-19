@@ -1,0 +1,21 @@
+{
+  "name": "@malko-opensource/friction-kit",
+  "version": "0.1.0",
+  "description": "Human judgment as an executable contract for Codex SDK workflows.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22.13" },
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "repository": { "type": "git", "url": "https://github.com/Malko-opensource/friction-kit.git" },
+  "files": ["dist", "README.md", "LICENSE", "SECURITY.md", "docs"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "check": "npm run build && npm test",
+    "demo": "node --import tsx examples/demo.ts",
+    "smoke": "node --import tsx examples/live-smoke.ts"
+  },
+  "dependencies": { "@openai/codex-sdk": "0.163.0" },
+  "devDependencies": { "@types/node": "^22.0.0", "tsx": "^4.0.0", "typescript": "^5.0.0" }
+}
