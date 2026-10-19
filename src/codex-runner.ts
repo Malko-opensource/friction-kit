@@ -26,6 +26,8 @@ export interface CodexMcpServer {
   enabled: boolean;
 }
 
+export type CodexMcpInspector = (inspection: CodexMcpInspection) => Promise<CodexMcpServer[]>;
+
 export interface CodexRunnerOptions {
   workingDirectory: string;
   model?: string;
@@ -34,7 +36,7 @@ export interface CodexRunnerOptions {
   signal?: AbortSignal;
   sdkClientFactory?: (options: CodexOptions) => CodexClient;
   /** Test seam. The production implementation uses the same CLI as the SDK. */
-  inspectMcpServers?: (inspection: CodexMcpInspection) => Promise<CodexMcpServer[]>;
+  inspectMcpServers?: CodexMcpInspector;
 }
 
 async function inspectMcpServers(inspection: CodexMcpInspection): Promise<CodexMcpServer[]> {
@@ -56,6 +58,35 @@ async function inspectMcpServers(inspection: CodexMcpInspection): Promise<CodexM
     throw new Error('Codex MCP preflight returned an unsupported server list; no model call was started.');
   }
   return servers.map(server => ({ name: server.name as string, enabled: server.enabled as boolean }));
+}
+
+/**
+ * Preserve the caller's configuration and disable inherited MCP tools, verifying
+ * the resulting state with the same CLI. This grants no tool permissions and
+ * does not authenticate a human decision; those remain host responsibilities.
+ */
+export async function prepareCodexConfig(
+  inspection: CodexMcpInspection,
+  inspect: CodexMcpInspector = inspectMcpServers,
+): Promise<string[]> {
+  inspection.signal.throwIfAborted();
+  const configOverrides = [...inspection.configOverrides];
+  const initialServers = await inspect({ ...inspection, configOverrides: [...configOverrides] });
+  inspection.signal.throwIfAborted();
+  for (const server of initialServers.filter(server => server.enabled)) {
+    // Codex 0.163.0's dotted config parser does not honor TOML-quoted
+    // segments. Refuse unsupported names rather than disable another key.
+    if (!/^[A-Za-z0-9_-]+$/.test(server.name)) {
+      throw new Error('An enabled MCP server has an unsupported name. Disable it in the host CLI configuration before running. No model call was started.');
+    }
+    configOverrides.push(`mcp_servers.${server.name}.enabled=false`);
+  }
+  const remainingServers = await inspect({ ...inspection, configOverrides: [...configOverrides] });
+  inspection.signal.throwIfAborted();
+  if (remainingServers.some(server => server.enabled)) {
+    throw new Error('Codex MCP tools remain enabled after preflight; no model call was started.');
+  }
+  return configOverrides;
 }
 
 export const proposalSchema = {
@@ -123,7 +154,7 @@ function usageFrom(usage: RunResult['usage']): TokenUsage | null {
 /** Codex SDK adapter for proposals. It does not execute a selected option. */
 export class CodexRunner implements AgentRunner {
   private readonly clientFactory: (options: CodexOptions) => CodexClient;
-  private readonly inspectMcpServers: (inspection: CodexMcpInspection) => Promise<CodexMcpServer[]>;
+  private readonly inspectMcpServers: CodexMcpInspector;
   private readonly codexPath: string;
   private readonly threadOptions: ThreadOptions;
   private readonly timeoutMs: number;
@@ -170,25 +201,11 @@ export class CodexRunner implements AgentRunner {
   }
 
   private async execute(request: AgentRequest, signal: AbortSignal): Promise<AgentResult> {
-    const configOverrides = ['features.shell_tool=false', 'features.apps=false',
-      'features.plugins=false', 'agents.enabled=false'];
-    const inspection = { codexPath: this.codexPath, workingDirectory: this.threadOptions.workingDirectory!,
-      configOverrides, signal };
-    const initialServers = await this.inspectMcpServers(inspection);
-    signal.throwIfAborted();
-    for (const server of initialServers.filter(server => server.enabled)) {
-      // Codex 0.163.0's dotted config parser does not honor TOML-quoted
-      // segments. Refuse unsupported names rather than disable another key.
-      if (!/^[A-Za-z0-9_-]+$/.test(server.name)) {
-        throw new Error('An enabled MCP server has an unsupported name. Disable it in the host CLI configuration before running. No model call was started.');
-      }
-      configOverrides.push(`mcp_servers.${server.name}.enabled=false`);
-    }
-    const remainingServers = await this.inspectMcpServers({ ...inspection, configOverrides });
-    signal.throwIfAborted();
-    if (remainingServers.some(server => server.enabled)) {
-      throw new Error('Codex MCP tools remain enabled after preflight; no model call was started.');
-    }
+    const configOverrides = await prepareCodexConfig({ codexPath: this.codexPath,
+      workingDirectory: this.threadOptions.workingDirectory!, signal,
+      configOverrides: ['features.shell_tool=false', 'features.apps=false',
+        'features.plugins=false', 'agents.enabled=false'],
+    }, this.inspectMcpServers);
     const client = this.clientFactory({ codexPathOverride: this.codexPath, configOverrides });
     const thread = request.priorThreadId
       ? client.resumeThread(request.priorThreadId, { ...this.threadOptions })

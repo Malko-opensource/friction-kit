@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { CodexOptions, RunResult, ThreadOptions, TurnOptions } from '@openai/codex-sdk';
-import { CodexRunner, proposalSchema, type CodexClient, type CodexMcpInspection } from '../src/codex-runner.js';
+import { CodexRunner, prepareCodexConfig, proposalSchema, type CodexClient, type CodexMcpInspection } from '../src/codex-runner.js';
 import type { AgentRequest, Proposal } from '../src/types.js';
 
 const proposal: Proposal = {
@@ -58,6 +58,34 @@ function harness(result: RunResult = {
   };
   return { calls, client, thread, options };
 }
+
+test('MCP helper preserves caller overrides without mutating the input or prior inspection', async () => {
+  const overrides = Object.freeze(['features.shell_tool=true', 'features.apps=false']);
+  const signal = new AbortController().signal;
+  const inspections: CodexMcpInspection[] = [];
+  const result = await prepareCodexConfig({ codexPath: '/tmp/codex-fixture',
+    workingDirectory: '/tmp/example-workflow', configOverrides: overrides, signal }, async inspection => {
+    inspections.push(inspection);
+    return [{ name: 'calendar', enabled: !inspection.configOverrides.includes('mcp_servers.calendar.enabled=false') }];
+  });
+  assert.deepEqual(overrides, ['features.shell_tool=true', 'features.apps=false']);
+  assert.notEqual(result, overrides);
+  assert.deepEqual(result, [...overrides, 'mcp_servers.calendar.enabled=false']);
+  assert.deepEqual(inspections[0]?.configOverrides, overrides);
+  assert.deepEqual(inspections[1]?.configOverrides, result);
+  assert.ok(inspections.every(inspection => inspection.codexPath === '/tmp/codex-fixture'
+    && inspection.workingDirectory === '/tmp/example-workflow' && inspection.signal === signal));
+});
+
+test('MCP helper respects cancellation before inspecting a CLI', async () => {
+  const controller = new AbortController();
+  controller.abort(new Error('The host cancelled preparation.'));
+  let inspected = false;
+  await assert.rejects(prepareCodexConfig({ codexPath: 'codex', workingDirectory: '/tmp',
+    configOverrides: [], signal: controller.signal }, async () => { inspected = true; return []; }),
+  /The host cancelled preparation/);
+  assert.equal(inspected, false);
+});
 
 test('runs with restrictive SDK options, disables discovered MCP servers, and preserves human input', async () => {
   const fake = harness();

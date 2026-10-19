@@ -4,6 +4,8 @@ friction-kit assumes a trusted host application. Workflow decisions are applicat
 
 The Codex adapter defaults to analysis: read-only filesystem, disabled model web search and network access, and disabled shell/apps capabilities. Configured MCP integrations are separate capabilities. The adapter must inspect and disable inherited integrations before a live run; failure to establish that state must stop the run. Do not use prompt wording as a substitute for permissions.
 
+The exported `prepareCodexConfig()` helper preserves the caller's configuration and checks MCP disabling only. It does not authorize execution, authenticate decisions, or supply sandbox restrictions for a host adapter.
+
 Read-only filesystem access does not prevent reading sensitive local files. Use a dedicated workspace and a minimal Codex configuration, and grant only the data a task needs. A host configuration change, executable replacement, or malicious in-process caller is outside this library's protection boundary. No claim of OS-level isolation is made by the workflow tests.
 
 The library does not supply external-action tools. If you add one, bind its execution to the reviewed action, arguments, target, and current state. Isolate the external call from model/review retries, persist an operation identifier, and reconcile uncertain outcomes before retrying. A stored approval alone does not make an API operation idempotent.

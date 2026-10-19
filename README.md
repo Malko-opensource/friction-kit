@@ -63,6 +63,8 @@ Do not fill in the person's reason with generated text. Let the person say they 
 
 The workflow store owns task state and decisions. The runner owns model execution. The host application owns human identity, input authenticity, tool permissions, and any external effects. Code calling `decide()` is trusted; this package cannot distinguish a real person from a caller impersonating one. An HTTP service must authenticate decision requests itself.
 
+`prepareCodexConfig()` exposes the MCP inspection and disabling step for host adapters while preserving their supplied configuration. It does not grant tool permissions or authenticate human decisions; the default `CodexRunner` remains read-only.
+
 See [architecture](docs/architecture.md), [research and evaluation](docs/research.md), and [security boundaries](SECURITY.md). APIs are initial and may change before 1.0.
 
 ## Development
